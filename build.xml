@@ -1,0 +1,139 @@
+<?xml version="1.0"?>
+<!-- Version 0.4.3 -->
+<project name="Maid Build Tool" default="" basedir=".">
+
+	<property file="${project.basedir}/build.properties" />
+
+	<import file="${project.basedir}/build.common.xml"/>
+
+	<tstamp>
+		<format property="date" pattern="%d %b %Y" />
+		<format property="time" pattern="%R %Z" />
+		<format property="buildtime" pattern="%a, %d %b %Y, %H:%M" />
+		<format property="timestamp" pattern="%Y-%m-%d.%H%M%S" />
+	</tstamp>
+
+	<fileset dir="${site.path}" id="site-php">
+		<include name="**/*.php" />
+	</fileset>
+
+	<fileset dir="${application.path}" id="application-php">
+		<include name="**/*.php" />
+		<exclude name="Atrox/**/" />
+	</fileset>
+
+	<fileset dir="${test.path}" id="test-php">
+		<include name="**/*.php" />
+	</fileset>
+
+	<!-- Map used when replacing tokens in the setup target -->
+	<filterchain id="config-tokens">
+		<replacetokens>
+			<token key="ProjectName" value="${phing.project.name}" />
+			<token key="ProjectPath" value="${${environment}.install.path}" />
+			<token key="CachePath" value="${${environment}.cache.path}" />
+			<token key="LogPath" value="${${environment}.log.path}" />
+			<token key="DataPath" value="${${environment}.data.path}" />
+			<token key="IpAddress" value="${${environment}.install.ipAddress}" />
+			<token key="SiteDomain" value="${${environment}.site.domain}" />
+			<token key="EmailDeveloper" value="${${environment}.email.developer}" />
+			<token key="EmailSupport" value="${${environment}.email.support}" />
+			<token key="DatabaseHost" value="${${environment}.database.host}" />
+			<token key="DatabasePort" value="${${environment}.database.port}" />
+			<token key="DatabaseName" value="${${environment}.database.name}" />
+			<token key="MemcacheServer" value="${${environment}.memcache.server}" />
+			<token key="IncludeServerAlias" value="${${environment}.config.serveralias}" />
+		</replacetokens>
+	</filterchain>
+
+	<target name="clean" depends="rootCheck, cleanDocumentPath" 
+		description="Delete logs, cache and files created by build process">
+		<echo>Delete files created by build processes</echo>
+		<delete file="${vhost.path}" />
+		<delete file="${bootstrap.path}" />
+		<delete file="${development.cache.path}" />
+		<delete file="${development.log.path}" />
+	</target>
+
+	<target name="cleanDocumentPath">
+		<delete dir="${document.path}" includeemptydirs="true" verbose="false"
+			failonerror="true" />
+	</target>
+
+	<target name="test">
+	</target>
+
+	<target name="document" depends="rootCheck, cleanDocumentPath"
+		description="Builds the documentation for this project">
+		<mkdir dir="${document.path}" />
+
+		<phpdoc title="${application.name} API Documentation"
+			destdir="${document.path}" parseprivate="true" quiet="true"
+			output="HTML:frames:DOM/earthli">
+			<fileset refid="application-php" />
+		</phpdoc>
+	</target>
+
+	<target name="checkStandards" description="Check all of the code meets the coding standards"
+		depends="checkApplicationStandards, checkSiteStandards, checkTestStandards">
+	</target>
+
+	<target name="checkApplicationStandards">
+		<phpcodesniffer standard="/var/application/Clock/CodeSniffer/Clock"
+			format="report" file="${application.path}" ignorePatterns="Atrox"
+			allowedFileExtensions="php" haltonerror="true" />
+	</target>
+
+	<target name="checkSiteStandards">
+		<phpcodesniffer standard="/var/application/Clock/CodeSniffer/Clock"
+			format="report" file="${site.path}" ignorePatterns="Atrox"
+			allowedFileExtensions="php" haltonerror="true" />
+	</target>
+
+	<target name="checkTestStandards">
+		<phpcodesniffer standard="/var/application/Clock/CodeSniffer/Clock"
+			format="summary" file="${test.path}" ignorePatterns="Atrox"
+			allowedFileExtensions="php" haltonerror="true" />
+	</target>
+
+	<target name="validate" description="Check all of the code syntax is valid"
+		depends="validateApplication, validateSite, validateTest">
+	</target>
+
+	<target name="validateSite">
+		<phplint>
+			<fileset refid="site-php" />
+		</phplint>
+	</target>
+
+	<target name="validateApplication">
+		<phplint>
+			<fileset refid="application-php" />
+		</phplint>
+	</target>
+
+	<target name="validateTest">
+		<phplint>
+			<fileset refid="test-php" />
+		</phplint>
+	</target>
+
+	<target name="setupConfig" depends="environmentCheck">
+
+		<exec command="sudo -u www-data sh -c 'umask 002; mkdir -p ${${environment}.log.path}/Error'" checkreturn="true" />
+		<exec command="sudo -u www-data sh -c 'umask 002; mkdir -p ${${environment}.cache.path}/Content'" checkreturn="true" />
+		<exec command="sudo -u www-data sh -c 'umask 002; mkdir -p ${${environment}.cache.path}/Binary'" checkreturn="true" />
+		<exec command="sudo -u www-data sh -c 'umask 002; mkdir -p ${${environment}.cache.path}/Resource'" checkreturn="true" />
+		<exec command="sudo -u www-data sh -c 'umask 002; mkdir -p ${${environment}.data.path}/UnversionedResource'" checkreturn="true" />
+		<exec command="sudo -u www-data sh -c 'umask 002; mkdir -p ${${environment}.data.path}/Binary'" checkreturn="true" />
+
+		<phingcall target="setupCore" />
+
+	</target>
+
+	<target name="deployConfig" depends="environmentCheck">
+		<phingcall target="deployCore">
+			<property name="site.address" value="http://${${environment}.site.domain}" />
+		</phingcall>
+	</target>
+</project>

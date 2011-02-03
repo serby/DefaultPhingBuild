@@ -1,0 +1,18 @@
+<?php
+/**
+ * Application Startup
+ * @description Setup the application Enviroment and application level globals
+ * @author Paul Serby <paul.serby@clock.co.uk>
+ * @date 2010-06-24
+ */
+
+/**
+ *
+ *
+ * WARNING: Make sure that changes you want to commit are made in the .template version of this file.
+ *
+ *
+ */
+
+$projectName = "@ProjectName@";
+$title = "Maid";

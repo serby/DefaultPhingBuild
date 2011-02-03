@@ -1,0 +1,530 @@
+<?xml version="1.0"?>
+<!-- Version 0.4.3 -->
+<project name="Clock Common Build Targets" default="" basedir=".">
+
+	<taskdef name="dependency" classname="phing.clock.tasks.DependencyTask" />
+
+	<target name="setupCore" depends="environmentCheck, rootCheck, checkDependencies">
+
+		<echo message="Setting up ${phing.project.name}" />
+
+		<echo message="Making directory structure" />
+
+		<mkdir dir="${${environment}.log.path}/Error" />
+		<mkdir dir="${${environment}.cache.path}/Content" />
+		<mkdir dir="${${environment}.cache.path}/Binary" />
+		<mkdir dir="${${environment}.cache.path}/Resource" />
+		<mkdir dir="${${environment}.data.path}/Binary" />
+
+		<available file="${${environment}.install.path}/${vhost.path}.template"
+			property="vhost.template.exists" value="1" />
+
+		<if>
+			<equals arg1="${vhost.template.exists}" arg2="1" />
+			<then>
+				<copy file="${${environment}.install.path}/${vhost.path}.template" tofile="${${environment}.install.path}/${vhost.path}"
+					overwrite="true" />
+				<echo message="Creating '${${environment}.install.path}/${vhost.path}' from template" />
+			</then>
+		</if>
+
+		<available file="${${environment}.install.path}/${bootstrap.path}.template" property="bootstrap.template.exists"
+			value="1" />
+		<if>
+			<equals arg1="${bootstrap.template.exists}" arg2="1" />
+			<then>
+				<copy file="${${environment}.install.path}/${bootstrap.path}.template"
+					tofile="${${environment}.install.path}/${bootstrap.path}" overwrite="true" />
+				<echo
+					message="Creating '${${environment}.install.path}/${bootstrap.path}' from template" />
+			</then>
+		</if>
+
+		<reflexive>
+			<fileset dir="${${environment}.install.path}">
+				<include name="${vhost.path}" />
+				<include name="${bootstrap.path}" />
+			</fileset>
+			<filterchain refid="config-tokens" />
+		</reflexive>
+
+		<exec command="ln -sf '${${environment}.install.path}/${vhost.path}' '${apache.include.path}/${${environment}.site.domain}.conf'" />
+
+		<phingcall target="reloadApache" />
+
+	</target>
+
+	<target name="setup" description="Sets up the project based on the environment variable in deploy-info.json">
+	
+	<property name="environment" value="development" override="true" />
+	
+		<php returnProperty="environment"
+			expression="@json_decode(file_get_contents('Site/Root/deploy-info.json'))->environment;" />
+
+		<if>
+			<or>
+				<equals arg1="${environment}" arg2="@ENVIRONMENT@" />
+				<not><isset property="site.address" /></not>
+			</or>
+			<then>
+				<property name="environment" value="development" override="true" />
+			</then>
+		</if>
+
+		<phingcall target="setupConfig" />
+	</target>
+
+	<target name="deployCore" depends="environmentCheck, rootCheck">
+		<if>
+			<equals arg1="${environment}" arg2="production" />
+			<then>
+				<property name="repositoryToDeploy" value="${repositoryUrl}" />
+			</then>
+			<else>
+				<exec command="svn info | grep URL | cut -d ' ' -f 2" outputProperty="repositoryToDeploy" />
+			</else>
+		</if>
+
+		<input propertyname="confirmRepository" validargs="yes,no" defaultvalue="no">
+			Please confirm that you want to deploy from this repository: ${repositoryToDeploy}
+		</input>
+
+		<if>
+			<equals arg1="${confirmRepository}" arg2="" />
+			<then>
+				<fail message="Please switch to the desired repository before deploying." />
+			</then>
+		</if>
+
+		<propertyPrompt propertyname="customRevisionNumber" defaultValue="HEAD"
+			promptText="Please enter the revision number from the repository you are deploying." />
+
+		<if>
+			<isset property="site.address" />
+			<then>
+				<php returnProperty="currentVersionNumber"
+					expression="@json_decode(file_get_contents('${site.address}/deploy-info.json'))->version;" />
+
+				<if>
+					<isset property="currentVersionNumber" />
+					<then>
+						<echo>Current version is: ${currentVersionNumber}</echo>
+					</then>
+					<else>
+						<echo>Unable to find current version number. Please ensure there is a deploy-info.json in the site route.</echo>
+						<property name="currentVersionNumber" value="1.0" />
+					</else>
+				</if>
+
+			</then>
+		</if>
+
+		<propertyPrompt useExistingValue="true" propertyname="versionNumber" defaultValue="${currentVersionNumber}" promptText="Please enter the version number you are deploying?" />
+
+		<if>
+			<equals arg1="${customRevisionNumber}" arg2="HEAD" />
+			<then>
+				<echo msg="Exporting head revision." />
+			</then>
+			<else>
+				<echo msg="Exporting revision number ${customRevisionNumber}." />
+			</else>
+		</if>
+
+		<input propertyname="confirm" validargs="yes,no" defaultvalue="no">
+			Do you want to delete the temporary SVN directory post deploy? Keeping it will make future deployments quicker.
+		</input>
+
+		<property name="svnDirectory" value="/tmp/${application.name}.tmp" />
+
+		<available file="${svnDirectory}"
+			property="deployment.temp.path.exists" value="1" />
+
+		<if>
+			<equals arg1="${deployment.temp.path.exists}" arg2="1" />
+			<then>
+				<exec command="svn revert -R ${svnDirectory}" />
+				<exec command="svn info ${svnDirectory} | grep URL | cut -d ' ' -f 2" outputProperty="tmpSvnRepository" />
+				<if>
+					<not>
+						<equals arg1="${repositoryToDeploy}" arg2="${tmpSvnRepository}" />
+					</not>
+					<then>
+						<exec command="svn switch ${repositoryToDeploy} ${svnDirectory}" checkreturn="true" />
+					</then>
+				</if>
+				<svnupdate
+					revision="${customRevisionNumber}"
+					svnpath="/usr/bin/svn"
+					force="true"
+					nocache="true"
+					todir="${svnDirectory}" />
+			</then>
+			<else>
+				<svncheckout
+					revision="${customRevisionNumber}"
+					svnpath="/usr/bin/svn"
+					force="true"
+					nocache="true"
+					repositoryurl="${repositoryToDeploy}"
+					todir="${svnDirectory}" />
+			</else>
+		</if>
+
+		<svnlastrevision
+			svnpath="/usr/bin/svn"
+			workingcopy="${svnDirectory}"
+			propertyname="revisionNumber" />
+
+		<!--
+		<copy todir="${project.basedir}.tmp" overwrite="true" tstamp="true">
+			<fileset dir="${project.basedir}" />
+		</copy>
+		-->
+
+		<phingcall target="cleanBadFiles">
+			<property name="path" value="${svnDirectory}" />
+		</phingcall>
+
+		<phingcall target="parseBuildVariables">
+			<property name="path" value="${svnDirectory}/" />
+			<property name="revisionNumber" value="${revisionNumber}" />
+		</phingcall>
+
+		<property name="tempDirectory" value="${${environment}.install.path}.tmp" />
+
+		<exec command="ssh -p ${${environment}.install.port} ${${environment}.install.host} 'umask 0002; mkdir -p ${${environment}.install.path} &amp;&amp; rsync -hav --exclude='/Data/' ${${environment}.install.path}/ ${tempDirectory}'" checkreturn="true" />
+		<exec command="rsync -hav --exclude='\.*' --exclude='/Asset/' -e 'ssh -axp ${${environment}.install.port}' ${svnDirectory}/ ${${environment}.install.host}:${tempDirectory}" logoutput="true" checkreturn="true" />
+		<exec command="ssh -p ${${environment}.install.port} ${${environment}.install.host} '[ ! -d ${${environment}.install.path}.${versionNumber}.${revisionNumber} ]'" checkreturn="true" />
+		<exec command="ssh -p ${${environment}.install.port} ${${environment}.install.host} 'mv ${${environment}.install.path}/ ${${environment}.install.path}.${versionNumber}.${revisionNumber} &amp;&amp; mv ${tempDirectory}/ ${${environment}.install.path} &amp;&amp; rm -rf ${tempDirectory}/'" checkreturn="true" />
+
+		<if>
+			<or>
+				<not>
+					<isset property="rollback" />
+				</not>
+				<equals arg1="${rollback}" arg2="0" />
+			</or>
+			<then>
+				<exec command="ssh -p ${${environment}.install.port} ${${environment}.install.host} 'rm -Rf ${${environment}.install.path}.${versionNumber}.${revisionNumber}'" />
+			</then>
+		</if>
+
+		<if>
+			<equals arg1="${confirm}" arg2="1" />
+			<then>
+				<exec command="rm -rf ${svnDirectory}" />
+			</then>
+		</if>
+
+		<echo>
+			If there has been changes to the configuration then you should run 'phing setup' on the target environment.
+		</echo>
+	</target>
+
+	<target name="deployInternal" description="Deploy the site to the Internal environment">
+		<phingcall target="deployConfig">
+			<property name="environment" value="internal" />
+		</phingcall>
+	</target>
+
+	<target name="deployTesting" description="Deploy the site to the testing environment">
+		<phingcall target="deployConfig">
+			<property name="environment" value="testing" />
+		</phingcall>
+	</target>
+
+	<target name="deployStaging" description="Deploy the site to the staging environment">
+		<phingcall target="deployConfig">
+			<property name="environment" value="staging" />
+		</phingcall>
+	</target>
+
+	<target name="deployProduction" description="Deploy the site to the production environment">
+		<phingcall target="deployConfig">
+			<property name="environment" value="production" />
+		</phingcall>
+	</target>
+
+	<target name="rootCheck">
+		<echo>Checking that the build is not being run as root...</echo>
+		<if>
+			<contains string="${env.USER}" substring="root" />
+			<then>
+				<fail message="You must not build as root." />
+			</then>
+		</if>
+	</target>
+
+	<target name="environmentCheck">
+		<fail unless="environment" message="You cannot run this target directly." />
+	</target>
+
+	<target name="reloadApache">
+		<echo message="Reloading Apache Configuration" />
+		<exec command="${apache.command} reload" checkreturn="true" />
+	</target>
+
+	<target name="recreateDatabase">
+		<exec command="pkill -f ${database}" />
+		<exec command="dropdb -U postgres -h ${host} -p ${port} ${database}" />
+		<exec command="createdb -E ${database.encoding} -U postgres -h ${host} -p ${port} -T template0 ${database}" checkreturn="true" />
+	</target>
+
+	<target name="createDatabase">
+		<php returnProperty="environment"
+			expression="@json_decode(file_get_contents('Site/Root/deploy-info.json'))->environment;" />
+
+		<if>
+			<equals arg1="${environment}" arg2="@ENVIRONMENT@" />
+			<then>
+				<property name="environment" value="development" override="true" />
+			</then>
+		</if>
+
+		<input propertyname="database" defaultValue="${${environment}.database.name}">Database to create?</input>
+		<input propertyname="host" defaultValue="${${environment}.database.host}">Database host?</input>
+		<input propertyname="port" defaultValue="${${environment}.database.port}">Database port?</input>
+		<input propertyname="password" defaultValue="">Password?</input>
+
+		<input propertyname="confirmProcessDelta" validargs="yes,no" defaultvalue="yes">
+			Do you want process the delta updates?
+		</input>
+
+		<input propertyname="confirmRecreateDatabase" validargs="yes,no" defaultvalue="yes">
+			Do you want to create/recreate the database?
+		</input>
+
+		<if>
+			<equals arg1="${confirmRecreateDatabase}" arg2="1" />
+			<then>
+				<phingcall target="recreateDatabase" />
+			</then>
+		</if>
+
+		<phingcall target="processDatabaseUpdates">
+			<property name="update.path" value="${database.schema.path}" />
+		</phingcall>
+
+		<if>
+			<equals arg1="${confirmProcessDelta}" arg2="1" />
+			<then>
+				<phingcall target="processDatabaseUpdates">
+					<property name="update.path" value="${database.delta.path}" />
+				</phingcall>
+			</then>
+		</if>
+
+	</target>
+
+	<target name="updateDatabase">
+		<if>
+			<not>
+				<isset property="database" />
+			</not>
+			<then>
+				<if>
+					<not>
+						<isset property="environment" />
+					</not>
+					<then>
+						<php returnProperty="environment"
+							expression="@json_decode(file_get_contents('Site/Root/deploy-info.json'))->environment;" />
+
+						<if>
+							<equals arg1="${environment}" arg2="@ENVIRONMENT@" />
+							<then>
+								<property name="environment" value="development" override="true" />
+							</then>
+						</if>
+					</then>
+				</if>
+
+				<input propertyname="database" defaultValue="${${environment}.database.name}">Database to update?</input>
+				<input propertyname="host" defaultValue="${${environment}.database.host}">Database host?</input>
+				<input propertyname="port" defaultValue="${${environment}.database.port}">Database port?</input>
+				<input propertyname="password" defaultValue="">Password?</input>
+			</then>
+		</if>
+
+		<phingcall target="processDatabaseUpdates">
+			<property name="update.path" value="${database.delta.path}" />
+		</phingcall>
+	</target>
+
+	<target name="processDatabaseUpdates">
+
+		<echo><![CDATA[
+			If this fails you might need to run the following command:
+			phing -f /usr/share/php/phing/clock/build.xml update
+		]]>
+		</echo>
+
+		<taskdef name="updatedatabase" classname="phing.clock.tasks.DatabaseUpdaterTask" />
+
+		<fail unless="database" message="Property database must be set." />
+		<fail unless="host" message="Property host must be set." />
+		<fail unless="port" message="Property port must be set." />
+		<fail unless="password" message="Property password must be set." />
+		<fail unless="update.path" message="Property update.path must be set." />
+
+		<exec command="PGPASSWORD=${password} ; echo 'ALTER DATABASE &quot;${database}&quot; SET TimeZone=0;' | psql -U postgres -p ${port} -h ${host} -d ${database}" />
+
+		<updatedatabase
+			dsn="pgsql:host=${host} port=${port} dbname=${database} user=postgres password=${password}"
+			path="${update.path}"
+		/>
+	</target>
+
+	<target name="getDynamicContent" description="Gets the database and binaries from a given environment">
+		<input propertyname="settingType" validargs="environment,custom" defaultvalue="environment">
+			Would you like to duplicate from one environments pre-set settings to another, or enter your own custom settings?
+		</input>
+
+		<if>
+			<equals arg1="${settingType}" arg2="environment" />
+			<then>
+				<input propertyname="localEnvironment" defaultValue="development">Which environment are you on?</input>
+				<input propertyname="remoteEnvironment" defaultValue="testing">Which environment would you like to duplicate?</input>
+
+				<property name="local.database.host" value="${${localEnvironment}.database.host}" />
+				<property name="local.database.port" value="${${localEnvironment}.database.port}" />
+				<property name="local.database.name" value="${${localEnvironment}.database.name}" />
+
+				<property name="remote.database.host" value="${${remoteEnvironment}.database.host}" />
+				<property name="remote.database.port" value="${${remoteEnvironment}.database.port}" />
+				<property name="remote.database.name" value="${${remoteEnvironment}.database.name}" />
+
+				<property name="remote.install.host" value="${${remoteEnvironment}.install.host}" />
+				<property name="remote.install.port" value="${${remoteEnvironment}.install.port}" />
+				<property name="remote.install.user" value="${${remoteEnvironment}.install.user}" />
+
+				<property name="local.cache.path" value="${${localEnvironment}.cache.path}" />
+				<property name="remote.cache.path" value="${${remoteEnvironment}.cache.path}" />
+
+				<property name="local.data.path" value="${${localEnvironment}.data.path}" />
+				<property name="remote.data.path" value="${${remoteEnvironment}.data.path}" />
+			</then>
+			<else>
+				<input propertyname="local.database.host">Local database host?</input>
+				<input propertyname="local.database.port">Local database port?</input>
+				<input propertyname="local.database.name">Local database name?</input>
+
+				<input propertyname="remote.database.host">Remote database host?</input>
+				<input propertyname="remote.database.port">Remote database port?</input>
+				<input propertyname="remote.database.name">Remote database name?</input>
+
+				<input propertyname="remote.install.host">Remote server host?</input>
+				<input propertyname="remote.install.port">Remote server port?</input>
+				<input propertyname="remote.install.user">Remote server user?</input>
+
+				<input propertyname="local.cache.path">Local cache path?</input>
+				<input propertyname="remote.cache.path">Remote cache path?</input>
+
+				<input propertyname="local.data.path">Local data path?</input>
+				<input propertyname="remote.data.path">Remote data path?</input>
+			</else>
+		</if>
+
+		<input propertyname="remotePassword" defaultValue="">Please enter the remote database password</input>
+
+		<property name="dumpfile" value="/tmp/${remote.database.name}-temp_dump.sql" />
+		<exec command="ssh -p ${remote.install.port} ${remote.install.host} 'export PGPASSWORD=${remotePassword} ; pg_dump -U postgres -h ${remote.database.host} -p ${remote.database.port} ${remote.database.name}' > ${dumpfile}" checkreturn="true" />
+
+		<exec command="pkill -f ${local.database.name}" />
+		<exec command="dropdb -U postgres -h ${local.database.host} -p ${local.database.port} ${local.database.name}" />
+		<exec command="createdb -E ${database.encoding} -U postgres -T template0 -h ${local.database.host} -p ${local.database.port} ${local.database.name}" />
+
+		<exec command="cat ${dumpfile} | psql -U postgres -h ${local.database.host} -p ${local.database.port} ${local.database.name}" />
+
+		<phingcall target="updateDatabase" />
+
+		<exec command="rsync --delete -ave 'ssh -p ${remote.install.port}' ${remote.install.host}:${remote.cache.path}/ ${local.cache.path}/" />
+		<exec command="rsync --delete -ave 'ssh -p ${remote.install.port}' ${remote.install.host}:${remote.data.path}/ ${local.data.path}/" />
+
+		<if>
+			<isset property="localEnvironment" />
+			<then>
+				<php returnProperty="capitalisedEnvironment"
+					expression="ucfirst('${localEnvironment}');" />
+				<phingcall target="setup" />
+			</then>
+		</if>
+
+	</target>
+
+	<target name="parseBuildVariables">
+
+		<echo msg="Updating build variables..." />
+
+		<property name="fullVersionNumber" value="${versionNumber}" override="true" />
+
+		<if>
+			<not>
+				<isset property="path" />
+			</not>
+			<then>
+				<fail>You must provide a path</fail>
+			</then>
+		</if>
+
+		<if>
+			<isset property="revisionNumber" />
+			<then>
+				<echo msg="Using revision number: ${revisionNumber}" />
+				<property name="fullVersionNumber" value="${versionNumber}-${revisionNumber}" override="true" />
+			</then>
+		</if>
+
+		<reflexive>
+			<fileset dir="${path}">
+				<include name="**/*.css" />
+				<include name="**/*.js" />
+				<include name="**/*.html" />
+				<include name="**/*.php" />
+				<include name="**/*.htc" />
+				<include name="**/*.tpl" />
+				<include name="**/*.txt" />
+				<include name="**/*.xml" />
+				<include name="**/*.json" />
+				<exclude name="build.xml" />
+				<exclude name="build.common.xml" />
+				<exclude name="build.properties" />
+			</fileset>
+			<filterchain>
+				<replacetokens>
+					<token key="VERSION-NUMBER" value="${fullVersionNumber}" />
+					<token key="VERSION" value="${versionNumber}" />
+					<token key="REVISION" value="${revisionNumber}" />
+					<token key="DATE" value="${date}" />
+					<token key="TIME" value="${time}" />
+					<token key="ENVIRONMENT" value="${environment}" />
+					<token key="DEPLOYEDBY" value="${env.USER}" />
+				</replacetokens>
+			</filterchain>
+		</reflexive>
+	</target>
+
+	<target name="cleanBadFiles">
+		<delete>
+			<fileset dir="${path}" defaultexcludes="false">
+				<include name="**/_notes" />
+				<include name="**/Thumbs.db" />
+				<include name="**/.DS_Store" />
+				<include name="**/.AppleDouble" />
+			</fileset>
+		</delete>
+	</target>
+
+	<target name="checkDependencies">
+		<echo><![CDATA[
+			If this fails you might need to run the following command:
+			phing -f /usr/share/php/phing/clock/build.xml update
+		]]>
+		</echo>
+
+		<includepath classpath="${php.classpath}" />
+		<dependency type="class" name="Date" includeFile="Date.php" />
+		<dependency type="php" version="5.2.0" />
+	</target>
+</project>

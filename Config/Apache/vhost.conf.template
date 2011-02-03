@@ -1,0 +1,42 @@
+<VirtualHost @IpAddress@:80>
+
+	ServerName @SiteDomain@
+	ServerAlias stylist.co.uk
+
+	DocumentRoot @ProjectPath@/Site/Root
+
+	AliasMatch ^/resource/binary(.*) @DataPath@/Binary$1
+	AliasMatch ^/resource/unversioned(.*) @DataPath@/UnversionedResource$1
+	AliasMatch ^/resource/cache/binary(.*) @CachePath@/Binary$1
+	AliasMatch ^/resource/cache/resource(.*) @CachePath@/Resource$1
+
+	ErrorDocument 403	/error/403.php
+	ErrorDocument 404	/error/404.php
+
+	php_admin_value include_path ".:@ProjectPath@:@ProjectPath@/Application:@ProjectPath@/Site/Root:/usr/share/php"
+	php_admin_value allow_call_time_pass_reference off
+	php_admin_value zend.ze1_compatibility_mode off
+	php_admin_value magic_quotes_gpc on
+
+	# Additional functionality to include if the modules are installed.
+	# This is mostly for non-development environments.
+	Include @ProjectPath@/Config/Apache/Module/Expires.conf
+	Include @ProjectPath@/Config/Apache/Module/Deflate.conf
+	Include @ProjectPath@/Config/Apache/Module/RedirectToServer.conf
+
+	# Adding MIME Types to play HTML5 video
+	AddType video/ogg .ogv
+	AddType video/mp4 .mp4
+	AddType video/webm .webm
+
+	# Turn off etags as we are only on one server
+	FileETag none
+
+	<Location /admin>
+		# For uploading podcasts and attachments
+		# Increased to Battle the bloat
+		php_admin_value post_max_size 250M
+		php_admin_value memory_limit 250M
+		php_admin_value upload_max_filesize 250M
+	</Location>
+</VirtualHost>

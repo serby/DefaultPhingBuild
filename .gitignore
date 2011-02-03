@@ -1,0 +1,5 @@
+/.settings
+/Config/Apache/vhost.conf
+/.project
+/.buildpath
+/Application/Bootstrap.php
