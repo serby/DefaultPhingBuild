@@ -1,6 +1,14 @@
 Maid the Clock Setup, Build and Deploying Tool
 ==============================================
 
+Licence
+-------
+
+Maid is a Clock product distributed under the new BSD licence. 
+
+http://opensource.org/licenses/bsd-license.php
+
+
 Developers
 ----------
 * Paul Serby <paul.serby@clock.co.uk>
