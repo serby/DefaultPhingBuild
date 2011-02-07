@@ -1,7 +1,6 @@
 <VirtualHost @IpAddress@:80>
 
 	ServerName @SiteDomain@
-	ServerAlias stylist.co.uk
 
 	DocumentRoot @ProjectPath@/Site/Root
 
@@ -14,8 +13,8 @@
 	ErrorDocument 404	/error/404.php
 
 	php_admin_value include_path ".:@ProjectPath@:@ProjectPath@/Application:@ProjectPath@/Site/Root:/usr/share/php"
-	php_admin_value allow_call_time_pass_reference off
-	php_admin_value zend.ze1_compatibility_mode off
+
+	# You should try as hard as you can to remove the need for magic quotes.
 	php_admin_value magic_quotes_gpc on
 
 	# Additional functionality to include if the modules are installed.
